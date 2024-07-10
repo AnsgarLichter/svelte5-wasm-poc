@@ -50,7 +50,7 @@
     return data;
   };
 
-  const download = (data: Uint8Array) => {
+  const download = (data: Uint8Array | string) => {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([data], { type: "video/mp4" }));
     a.download = "output.mp4";
