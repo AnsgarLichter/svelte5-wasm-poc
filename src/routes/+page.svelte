@@ -4,15 +4,15 @@
 
   import { FFmpeg } from "@ffmpeg/ffmpeg";
 
-  type State =
+  type Status =
     | "loading"
     | "loaded"
     | "convert.start"
     | "convert.done"
     | "convert.error";
 
-  let state = $state("loading") as State;
-  let error = "";
+  let status = $state<Status>("loading");
+  let error = $state("");
   let ffmpeg: FFmpeg;
   let progress = tweened(0);
 
@@ -20,16 +20,16 @@
     const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
     ffmpeg = new FFmpeg();
 
-    ffmpeg.on('progress', (event: { progress: number; }) => {
+    ffmpeg.on("progress", (event: { progress: number }) => {
       progress.set(event.progress * 100);
     });
 
-    state = "loading";
+    status = "loading";
     await ffmpeg.load({
       coreURL: `${baseURL}/ffmpeg-core.js`,
       wasmURL: `${baseURL}/ffmpeg-core.wasm`,
     });
-    state = "loaded";
+    status = "loaded";
   };
 
   const fetchFile = async (file: File): Promise<Uint8Array> => {
@@ -37,25 +37,25 @@
   };
 
   const convertVideo = async (video: File) => {
-    state = 'convert.start';
+    status = "convert.start";
     error = "";
 
     const videoData = await fetchFile(video);
-    await ffmpeg.writeFile('input.webm', videoData);
-    await ffmpeg.exec(['-i', 'input.webm', 'output.mp4']);
-        
-    const data = await ffmpeg.readFile('output.mp4');
-    state = 'convert.done';
+    await ffmpeg.writeFile("input.webm", videoData);
+    await ffmpeg.exec(["-i", "input.webm", "output.mp4"]);
+
+    const data = await ffmpeg.readFile("output.mp4");
+    status = "convert.done";
 
     return data;
-  }
+  };
 
-  const download = (data: FileData) => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([data], { type: 'video/mp4' }));
-    a.download = 'output.mp4';
+  const download = (data: Uint8Array) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([data], { type: "video/mp4" }));
+    a.download = "output.mp4";
     a.click();
-  }
+  };
 
   const onDropped = async (event: DragEvent) => {
     event.preventDefault();
@@ -95,18 +95,18 @@
 <div
   ondrop={onDropped}
   ondragover={onDraggedOver}
-  data-state={state}
+  data-status={status}
   class="drop"
 >
-  {#if state === "loading"}
+  {#if status === "loading"}
     <p in:fade>Loading FFMpeg ....</p>
   {/if}
 
-  {#if state === "loaded"}
+  {#if status === "loaded"}
     <p in:fade>Drag video here</p>
   {/if}
 
-  {#if state === "convert.start"}
+  {#if status === "convert.start"}
     <p in:fade>Converting...</p>
 
     <div class="progress-bar">
@@ -116,7 +116,7 @@
     </div>
   {/if}
 
-  {#if state === "convert.done"}
+  {#if status === "convert.done"}
     <p in:fade>Done!</p>
   {/if}
 
