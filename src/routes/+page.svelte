@@ -3,6 +3,14 @@
   import { fade } from "svelte/transition";
 
   import { FFmpeg } from "@ffmpeg/ffmpeg";
+  import type { Log } from "@ffmpeg/types";
+
+  type Format = {
+    demuxingSupported: boolean;
+    muxingSupported: boolean;
+    abbreviation: string;
+    name: string;
+  };
 
   type Status =
     | "loading"
@@ -15,6 +23,8 @@
   let error = $state("");
   let ffmpeg: FFmpeg;
   let progress = tweened(0);
+  let formats = $state<Format[]>([]);
+  let selectedOutputFormat = $state("");
 
   const loadFFmpeg = async () => {
     const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
@@ -30,6 +40,54 @@
       wasmURL: `${baseURL}/ffmpeg-core.wasm`,
     });
     status = "loaded";
+
+    ffmpeg.on("log", (event: Log) => {
+      console.log(event.message);
+    });
+
+    const loggedFormats: Array<string> = [];
+    const logFormatOutput = (event: Log) => {
+      loggedFormats.push(event.message);
+    };
+    ffmpeg.on("log", logFormatOutput);
+
+    await ffmpeg.exec(["-formats"]);
+
+    formats = getFormatsFromLog(loggedFormats);
+    const outputFormats = formats.filter((f) => f.muxingSupported);
+    if(outputFormats.length > 0) {
+      selectedOutputFormat = outputFormats[0].abbreviation;
+    }
+  };
+
+  const getFormatsFromLog = (logMessages: Array<string>) => {
+    const formatLineRegex = /^(D|DE|E)\s+(\S+)\s+(.+)$/;
+    const results = [];
+
+    for (const line of logMessages) {
+      const trimmedLine = line.trim();
+
+      // Skip lines that don't start with 'D', 'DE', or 'E'
+      if (!formatLineRegex.test(trimmedLine)) {
+        continue;
+      }
+
+      // Use a regex to match and capture support, abbreviation, and name
+      const match = trimmedLine.match(formatLineRegex);
+      if (!match) {
+        continue;
+      }
+
+      const [, support, abbreviation, name] = match;
+      results.push({
+        demuxingSupported: support.includes("D"),
+        muxingSupported: support.includes("E"),
+        abbreviation,
+        name,
+      });
+    }
+
+    return results;
   };
 
   const fetchFile = async (file: File): Promise<Uint8Array> => {
@@ -42,7 +100,12 @@
 
     const videoData = await fetchFile(video);
     await ffmpeg.writeFile("input.webm", videoData);
-    await ffmpeg.exec(["-i", "input.webm", "output.mp4"]);
+    const result = await ffmpeg.exec(["-i", "input.webm", `output.${selectedOutputFormat}`]);
+    if(result !== 0) {
+      error = "Failed to convert video";
+      status = "convert.error";
+      return;
+    }
 
     const data = await ffmpeg.readFile("output.mp4");
     status = "convert.done";
@@ -71,12 +134,20 @@
     }
 
     const file = files[0];
-    if (file.type !== "video/webm") {
-      error = "Only WebM files are allowed";
+    const fileFormat = file.name.split(".").pop() || "";
+    const isFileFormatSupported = formats
+      .filter((f) => f.demuxingSupported)
+      .find((f) => file.name.endsWith(fileFormat));
+    if (!fileFormat || !isFileFormatSupported) {
+      error = `Data format ${fileFormat} not supported`;
       return;
     }
 
     const data = await convertVideo(file);
+    if(!data) {
+      return;
+    }
+    
     download(data);
   };
 
@@ -122,6 +193,36 @@
 
   {#if error}
     <p in:fade class="error">{error}</p>
+  {/if}
+</div>
+
+<div class="formats">
+  {#if formats.length === 0}
+    <p>Loading supported formats...</p>
+  {:else}
+    <h2>Available Output Formats</h2>
+
+    <fieldset>
+      <legend>Select your output format:</legend>
+      <div class="outputFormats">
+        {#each formats as format}
+          {#if format.muxingSupported}
+            <div>
+              <input
+                type="radio"
+                name="formats"
+                id={format.abbreviation}
+                value={format.abbreviation}
+                bind:group={selectedOutputFormat}
+              />
+              <label for={format.abbreviation}
+                >{format.name} ({format.abbreviation})</label
+              >
+            </div>
+          {/if}
+        {/each}
+      </div>
+    </fieldset>
   {/if}
 </div>
 
@@ -171,5 +272,16 @@
       color: var(--progress-txt-clr);
       border-radius: 8px;
     }
+  }
+
+  p,
+  label {
+    font:
+      1rem "Fira Sans",
+      sans-serif;
+  }
+
+  input {
+    margin: 0.4rem;
   }
 </style>
